@@ -104,5 +104,10 @@
       <summary>Expand tasks</summary>
       <description>If true, expand the tasks section in the calendar window.</description>
     </key>
+    <key name="vdir-calendar-dirs" type="as">
+      <default>[]</default>
+      <summary>List of vdir calendar directories</summary>
+      <description>A list of directories containing vdir-formatted calendars (each directory contains .ics files). This is used when vdir calendar support is enabled instead of Evolution Data Server. Example: ['/home/user/.calendars/personal', '/home/user/.calendars/work']</description>
+    </key>
   </schema>
 </schemalist>

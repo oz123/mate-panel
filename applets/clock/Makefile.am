@@ -44,6 +44,13 @@ CLOCK_SOURCES += \
 	calendar-debug.h
 endif
 
+if HAVE_VDIR
+CLOCK_SOURCES += \
+	calendar-client-vdir.c	\
+	calendar-client.h	\
+	calendar-debug.h
+endif
+
 CLOCK_CPPFLAGS =						\
 	$(AM_CPPFLAGS)						\
 	$(LIBMATE_PANEL_APPLET_CFLAGS)				\
@@ -57,6 +64,10 @@ if HAVE_EDS
 CLOCK_CPPFLAGS += $(EDS_CFLAGS)
 endif
 
+if HAVE_VDIR
+CLOCK_CPPFLAGS += $(VDIR_CFLAGS)
+endif
+
 CLOCK_LDADD =						\
 	../../libmate-panel-applet/libmate-panel-applet-4.la	\
 	$(CLOCK_LIBS)					\
@@ -66,6 +77,10 @@ CLOCK_LDADD =						\
 
 if HAVE_EDS
 CLOCK_LDADD += $(EDS_LIBS)
+endif
+
+if HAVE_VDIR
+CLOCK_LDADD += $(VDIR_LIBS)
 endif
 
 test_system_timezone_SOURCES = 	\

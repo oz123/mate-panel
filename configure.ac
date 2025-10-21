@@ -123,6 +123,33 @@ AM_CONDITIONAL(HAVE_EDS, test "x$have_eds" = "xyes")
 AC_SUBST(EDS_CFLAGS)
 AC_SUBST(EDS_LIBS)
 
+# Check for vdir support for calendar integration (alternative to EDS)
+AC_ARG_ENABLE([vdir],
+  AS_HELP_STRING([--enable-vdir], [Enable vdir calendar integration @<:@default=auto@:>@]),
+  [enable_vdir=$enableval],
+  [enable_vdir=auto])
+
+if test "x$enable_vdir" != "xno"; then
+  PKG_CHECK_MODULES(VDIR, [libical-glib >= 3.0.0 gio-2.0 >= $GLIB_REQUIRED], have_vdir=yes, have_vdir=no)
+  if test "x$have_vdir" = "xyes"; then
+    AC_DEFINE(HAVE_VDIR, 1, [Define if vdir calendar support is available])
+  elif test "x$enable_vdir" = "xyes"; then
+    AC_MSG_ERROR([vdir support requested but libical-glib development libraries not found])
+  fi
+else
+  have_vdir=no
+fi
+
+AM_CONDITIONAL(HAVE_VDIR, test "x$have_vdir" = "xyes")
+AC_SUBST(VDIR_CFLAGS)
+AC_SUBST(VDIR_LIBS)
+
+# Define HAVE_CALENDAR if either EDS or vdir is available
+if test "x$have_eds" = "xyes" -o "x$have_vdir" = "xyes"; then
+  AC_DEFINE(HAVE_CALENDAR, 1, [Define if calendar support (EDS or vdir) is available])
+fi
+AM_CONDITIONAL(HAVE_CALENDAR, test "x$have_eds" = "xyes" -o "x$have_vdir" = "xyes")
+
 # Make it possible to compile the applets in-process
 PANEL_INPROCESS_NONE=
 PANEL_INPROCESS_ALL=
@@ -395,6 +422,7 @@ echo "
         X11 support:                   ${have_x11}
         XRandr support:                ${have_randr}
         Evolution Data Server support: ${have_eds}
+        vdir calendar support:         ${have_vdir}
         Build introspection support:   ${found_introspection}
         Build gtk-doc documentation:   ${enable_gtk_doc}
 
