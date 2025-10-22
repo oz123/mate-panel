@@ -47,7 +47,7 @@ endif
 if HAVE_VDIR
 CLOCK_SOURCES += \
 	calendar-client-vdir.c	\
-	calendar-client.h	\
+	calendar-client-vdir.h	\
 	calendar-debug.h
 endif
 

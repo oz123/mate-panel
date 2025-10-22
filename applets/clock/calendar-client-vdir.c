@@ -24,10 +24,12 @@
 #include <config.h>
 
 #include "calendar-client.h"
+#include "calendar-client-vdir.h"
 
 #include <libintl.h>
 #include <string.h>
 #include <gio/gio.h>
+#define LIBICAL_GLIB_UNSTABLE_API
 #include <libical-glib/libical-glib.h>
 #include "system-timezone.h"
 
@@ -46,7 +48,7 @@ typedef struct _VdirSource VdirSource;
 
 struct _VdirSource
 {
-  CalendarClient *client;
+  CalendarClientVdir *client;
   gchar          *path;
   gchar          *display_name;
   gchar          *color;
@@ -55,7 +57,7 @@ struct _VdirSource
   guint           changed_signal_id;
 };
 
-struct _CalendarClientPrivate
+struct _CalendarClientVdirPrivate
 {
   GSettings  *settings;
   GSList     *sources;      /* List of VdirSource */
@@ -67,19 +69,19 @@ struct _CalendarClientPrivate
   guint       year;
 };
 
-static void calendar_client_finalize     (GObject             *object);
-static void calendar_client_set_property (GObject             *object,
+static void calendar_client_vdir_finalize     (GObject             *object);
+static void calendar_client_vdir_set_property (GObject             *object,
 					  guint                prop_id,
 					  const GValue        *value,
 					  GParamSpec          *pspec);
-static void calendar_client_get_property (GObject             *object,
+static void calendar_client_vdir_get_property (GObject             *object,
 					  guint                prop_id,
 					  GValue              *value,
 					  GParamSpec          *pspec);
 
 static void vdir_source_free (VdirSource *source);
-static void vdir_source_load_events (VdirSource *source, CalendarClient *client);
-static void reload_sources (CalendarClient *client);
+static void vdir_source_load_events (VdirSource *source, CalendarClientVdir *client);
+static void reload_sources (CalendarClientVdir *client);
 
 enum
 {
@@ -98,16 +100,16 @@ enum
 
 static guint signals[LAST_SIGNAL] = { 0, };
 
-G_DEFINE_TYPE_WITH_PRIVATE (CalendarClient, calendar_client, G_TYPE_OBJECT)
+G_DEFINE_TYPE_WITH_PRIVATE (CalendarClientVdir, calendar_client_vdir, G_TYPE_OBJECT)
 
 static void
-calendar_client_class_init (CalendarClientClass *klass)
+calendar_client_vdir_class_init (CalendarClientVdirClass *klass)
 {
   GObjectClass *gobject_class = (GObjectClass *) klass;
 
-  gobject_class->finalize     = calendar_client_finalize;
-  gobject_class->set_property = calendar_client_set_property;
-  gobject_class->get_property = calendar_client_get_property;
+  gobject_class->finalize     = calendar_client_vdir_finalize;
+  gobject_class->set_property = calendar_client_vdir_set_property;
+  gobject_class->get_property = calendar_client_vdir_get_property;
 
   g_object_class_install_property (gobject_class,
 				   PROP_DAY,
@@ -137,7 +139,7 @@ calendar_client_class_init (CalendarClientClass *klass)
     g_signal_new ("appointments-changed",
 		  G_TYPE_FROM_CLASS (gobject_class),
 		  G_SIGNAL_RUN_LAST,
-		  G_STRUCT_OFFSET (CalendarClientClass, appointments_changed),
+		  G_STRUCT_OFFSET (CalendarClientVdirClass, appointments_changed),
 		  NULL,
 		  NULL,
 		  NULL,
@@ -148,7 +150,7 @@ calendar_client_class_init (CalendarClientClass *klass)
     g_signal_new ("tasks-changed",
 		  G_TYPE_FROM_CLASS (gobject_class),
 		  G_SIGNAL_RUN_LAST,
-		  G_STRUCT_OFFSET (CalendarClientClass, tasks_changed),
+		  G_STRUCT_OFFSET (CalendarClientVdirClass, tasks_changed),
 		  NULL,
 		  NULL,
 		  NULL,
@@ -193,9 +195,9 @@ on_directory_changed (GFileMonitor     *monitor,
 }
 
 static void
-calendar_client_init (CalendarClient *client)
+calendar_client_vdir_init (CalendarClientVdir *client)
 {
-  client->priv = calendar_client_get_instance_private (client);
+  client->priv = calendar_client_vdir_get_instance_private (client);
   
   client->priv->sources = NULL;
   client->priv->zone = get_system_timezone ();
@@ -205,9 +207,9 @@ calendar_client_init (CalendarClient *client)
 }
 
 static void
-calendar_client_finalize (GObject *object)
+calendar_client_vdir_finalize (GObject *object)
 {
-  CalendarClient *client = CALENDAR_CLIENT (object);
+  CalendarClientVdir *client = CALENDAR_CLIENT_VDIR (object);
   
   if (client->priv->settings)
     g_object_unref (client->priv->settings);
@@ -216,29 +218,29 @@ calendar_client_finalize (GObject *object)
   g_slist_free_full (client->priv->sources, (GDestroyNotify) vdir_source_free);
   client->priv->sources = NULL;
   
-  G_OBJECT_CLASS (calendar_client_parent_class)->finalize (object);
+  G_OBJECT_CLASS (calendar_client_vdir_parent_class)->finalize (object);
 }
 
 static void
-calendar_client_set_property (GObject      *object,
+calendar_client_vdir_set_property (GObject      *object,
 			      guint         prop_id,
 			      const GValue *value,
 			      GParamSpec   *pspec)
 {
-  CalendarClient *client = CALENDAR_CLIENT (object);
+  CalendarClientVdir *client = CALENDAR_CLIENT_VDIR (object);
 
   switch (prop_id)
     {
     case PROP_DAY:
-      calendar_client_select_day (client, g_value_get_uint (value));
+      calendar_client_vdir_select_day (client, g_value_get_uint (value));
       break;
     case PROP_MONTH:
-      calendar_client_select_month (client,
+      calendar_client_vdir_select_month (client,
 				    g_value_get_uint (value),
 				    client->priv->year);
       break;
     case PROP_YEAR:
-      calendar_client_select_month (client,
+      calendar_client_vdir_select_month (client,
 				    client->priv->month,
 				    g_value_get_uint (value));
       break;
@@ -249,12 +251,12 @@ calendar_client_set_property (GObject      *object,
 }
 
 static void
-calendar_client_get_property (GObject    *object,
+calendar_client_vdir_get_property (GObject    *object,
 			      guint       prop_id,
 			      GValue     *value,
 			      GParamSpec *pspec)
 {
-  CalendarClient *client = CALENDAR_CLIENT (object);
+  CalendarClientVdir *client = CALENDAR_CLIENT_VDIR (object);
 
   switch (prop_id)
     {
@@ -273,10 +275,10 @@ calendar_client_get_property (GObject    *object,
     }
 }
 
-CalendarClient *
-calendar_client_new (GSettings *settings)
+CalendarClientVdir *
+calendar_client_vdir_new (GSettings *settings)
 {
-  CalendarClient *client = g_object_new (CALENDAR_TYPE_CLIENT, NULL);
+  CalendarClientVdir *client = g_object_new (CALENDAR_TYPE_CLIENT, NULL);
   
   if (settings)
     client->priv->settings = g_object_ref (settings);
@@ -470,9 +472,14 @@ create_event_from_component (ICalComponent *comp, VdirSource *source, ICalTimezo
           g_object_unref (prop);
         }
       
-      completed = i_cal_component_get_completed (comp);
-      task->completed_time = icaltime_to_timet (completed, default_zone);
-      g_clear_object (&completed);
+      prop = i_cal_component_get_first_property (comp, I_CAL_COMPLETED_PROPERTY);
+      if (prop)
+        {
+          completed = i_cal_property_get_completed (prop);
+          task->completed_time = icaltime_to_timet (completed, default_zone);
+          g_clear_object (&completed);
+          g_object_unref (prop);
+        }
       
       prop = i_cal_component_get_first_property (comp, I_CAL_PRIORITY_PROPERTY);
       if (prop)
@@ -488,7 +495,7 @@ create_event_from_component (ICalComponent *comp, VdirSource *source, ICalTimezo
 }
 
 static void
-expand_recurrence (ICalComponent *comp, VdirSource *source, CalendarClient *client,
+expand_recurrence (ICalComponent *comp, VdirSource *source, CalendarClientVdir *client,
                    time_t range_start, time_t range_end)
 {
   ICalProperty *rrule_prop;
@@ -571,7 +578,7 @@ expand_recurrence (ICalComponent *comp, VdirSource *source, CalendarClient *clie
 }
 
 static void
-vdir_source_load_events (VdirSource *source, CalendarClient *client)
+vdir_source_load_events (VdirSource *source, CalendarClientVdir *client)
 {
   GDir *dir;
   const gchar *filename;
@@ -615,7 +622,6 @@ vdir_source_load_events (VdirSource *source, CalendarClient *client)
   while ((filename = g_dir_read_name (dir)) != NULL)
     {
       gchar *filepath;
-      ICalParser *parser;
       ICalComponent *icalcomp, *subcomp;
       gchar *contents;
       gsize length;
@@ -637,10 +643,8 @@ vdir_source_load_events (VdirSource *source, CalendarClient *client)
           continue;
         }
       
-      parser = i_cal_parser_new ();
-      icalcomp = i_cal_parser_parse_string (parser, contents);
+      icalcomp = i_cal_parser_parse_string (contents);
       g_free (contents);
-      g_object_unref (parser);
       
       if (!icalcomp)
         {
@@ -710,7 +714,7 @@ vdir_source_load_events (VdirSource *source, CalendarClient *client)
 }
 
 static void
-reload_sources (CalendarClient *client)
+reload_sources (CalendarClientVdir *client)
 {
   gchar **dirs;
   gint i;
@@ -779,7 +783,7 @@ reload_sources (CalendarClient *client)
 }
 
 void
-calendar_client_get_date (CalendarClient *client,
+calendar_client_vdir_get_date (CalendarClientVdir *client,
                           guint          *year,
                           guint          *month,
                           guint          *day)
@@ -797,7 +801,7 @@ calendar_client_get_date (CalendarClient *client,
 }
 
 void
-calendar_client_select_month (CalendarClient *client,
+calendar_client_vdir_select_month (CalendarClientVdir *client,
 			      guint           month,
 			      guint           year)
 {
@@ -829,7 +833,7 @@ calendar_client_select_month (CalendarClient *client,
 }
 
 void
-calendar_client_select_day (CalendarClient *client,
+calendar_client_vdir_select_day (CalendarClientVdir *client,
 			    guint           day)
 {
   g_return_if_fail (CALENDAR_IS_CLIENT (client));
@@ -842,242 +846,7 @@ calendar_client_select_day (CalendarClient *client,
     }
 }
 
-static CalendarEvent *
-calendar_event_copy (CalendarEvent *event);
-
-GSList *
-calendar_client_get_events (CalendarClient    *client,
-			    CalendarEventType  event_mask)
-{
-  GSList *result = NULL;
-  GSList *l;
-  time_t day_begin, day_end;
-  
-  g_return_val_if_fail (CALENDAR_IS_CLIENT (client), NULL);
-  g_return_val_if_fail (client->priv->day != G_MAXUINT, NULL);
-  g_return_val_if_fail (client->priv->month != G_MAXUINT, NULL);
-  g_return_val_if_fail (client->priv->year != G_MAXUINT, NULL);
-
-  day_begin = make_time_for_day_begin (client->priv->day,
-				       client->priv->month,
-				       client->priv->year);
-  day_end   = make_time_for_day_begin (client->priv->day + 1,
-				       client->priv->month,
-				       client->priv->year);
-
-  for (l = client->priv->sources; l != NULL; l = l->next)
-    {
-      VdirSource *source = l->data;
-      GHashTableIter iter;
-      gpointer key, value;
-      
-      g_hash_table_iter_init (&iter, source->events);
-      while (g_hash_table_iter_next (&iter, &key, &value))
-        {
-          CalendarEvent *event = value;
-          
-          if (event->type == CALENDAR_EVENT_APPOINTMENT && (event_mask & CALENDAR_EVENT_APPOINTMENT))
-            {
-              CalendarAppointment *appt = CALENDAR_APPOINTMENT (event);
-              
-              /* Check if appointment is on this day */
-              if ((appt->start_time >= day_begin && appt->start_time < day_end) ||
-                  (appt->start_time <= day_begin && appt->end_time > day_begin))
-                {
-                  result = g_slist_prepend (result, calendar_event_copy (event));
-                }
-            }
-          else if (event->type == CALENDAR_EVENT_TASK && (event_mask & CALENDAR_EVENT_TASK))
-            {
-              /* Include all tasks */
-              result = g_slist_prepend (result, calendar_event_copy (event));
-            }
-        }
-    }
-  
-  return result;
-}
-
-void
-calendar_client_foreach_appointment_day (CalendarClient  *client,
-					 CalendarDayIter  iter_func,
-					 gpointer         user_data)
-{
-  GSList *l;
-  gboolean marked_days[32] = { FALSE, };
-  time_t month_begin, month_end;
-  int i;
-  
-  g_return_if_fail (CALENDAR_IS_CLIENT (client));
-  g_return_if_fail (iter_func != NULL);
-  g_return_if_fail (client->priv->month != G_MAXUINT);
-  g_return_if_fail (client->priv->year != G_MAXUINT);
-
-  month_begin = make_time_for_day_begin (1,
-					 client->priv->month,
-					 client->priv->year);
-  month_end   = make_time_for_day_begin (1,
-					 client->priv->month + 1,
-					 client->priv->year);
-
-  for (l = client->priv->sources; l != NULL; l = l->next)
-    {
-      VdirSource *source = l->data;
-      GHashTableIter iter;
-      gpointer key, value;
-      
-      g_hash_table_iter_init (&iter, source->events);
-      while (g_hash_table_iter_next (&iter, &key, &value))
-        {
-          CalendarEvent *event = value;
-          
-          if (event->type == CALENDAR_EVENT_APPOINTMENT)
-            {
-              CalendarAppointment *appt = CALENDAR_APPOINTMENT (event);
-              
-              if (appt->start_time >= month_begin && appt->start_time < month_end)
-                {
-                  struct tm *tm = localtime (&appt->start_time);
-                  if (tm && tm->tm_mday >= 1 && tm->tm_mday <= 31)
-                    marked_days[tm->tm_mday] = TRUE;
-                }
-            }
-        }
-    }
-
-  for (i = 1; i < 32; i++)
-    {
-      if (marked_days[i])
-	iter_func (client, i, user_data);
-    }
-}
-
-void
-calendar_client_set_task_completed (CalendarClient *client,
-				    char           *task_uid,
-				    gboolean        task_completed,
-				    guint           percent_complete)
-{
-  /* Not implemented for vdir (read-only for now) */
-  g_warning ("calendar_client_set_task_completed not implemented for vdir backend");
-}
-
-gboolean
-calendar_client_create_task (CalendarClient *client,
-                            const char     *summary)
-{
-  /* Not implemented for vdir (read-only for now) */
-  g_warning ("calendar_client_create_task not implemented for vdir backend");
-  return FALSE;
-}
-
-void
-calendar_client_update_appointments (CalendarClient *client)
-{
-  GSList *l;
-  
-  g_return_if_fail (CALENDAR_IS_CLIENT (client));
-  
-  for (l = client->priv->sources; l != NULL; l = l->next)
-    {
-      VdirSource *source = l->data;
-      vdir_source_load_events (source, client);
-    }
-  
-  g_signal_emit (client, signals[APPOINTMENTS_CHANGED], 0);
-}
-
-void
-calendar_client_update_tasks (CalendarClient *client)
-{
-  GSList *l;
-  
-  g_return_if_fail (CALENDAR_IS_CLIENT (client));
-  
-  for (l = client->priv->sources; l != NULL; l = l->next)
-    {
-      VdirSource *source = l->data;
-      vdir_source_load_events (source, client);
-    }
-  
-  g_signal_emit (client, signals[TASKS_CHANGED], 0);
-}
-
-/* Event memory management */
-
-static void
-calendar_appointment_finalize (CalendarAppointment *appointment)
-{
-  GSList *l;
-
-  for (l = appointment->occurrences; l; l = l->next)
-    g_free (l->data);
-  g_slist_free (appointment->occurrences);
-  appointment->occurrences = NULL;
-
-  g_free (appointment->uid);
-  appointment->uid = NULL;
-
-  g_free (appointment->rid);
-  appointment->rid = NULL;
-
-  g_free (appointment->backend_name);
-  appointment->backend_name = NULL;
-
-  g_free (appointment->summary);
-  appointment->summary = NULL;
-
-  g_free (appointment->description);
-  appointment->description = NULL;
-
-  g_free (appointment->color_string);
-  appointment->color_string = NULL;
-
-  appointment->start_time = 0;
-  appointment->is_all_day = FALSE;
-}
-
-static void
-calendar_task_finalize (CalendarTask *task)
-{
-  g_free (task->uid);
-  task->uid = NULL;
-
-  g_free (task->summary);
-  task->summary = NULL;
-
-  g_free (task->description);
-  task->description = NULL;
-
-  g_free (task->color_string);
-  task->color_string = NULL;
-
-  task->percent_complete = 0;
-}
-
-void
-calendar_event_free (CalendarEvent *event)
-{
-  if (!event)
-    return;
-  
-  switch (event->type)
-    {
-    case CALENDAR_EVENT_APPOINTMENT:
-      calendar_appointment_finalize (CALENDAR_APPOINTMENT (event));
-      break;
-    case CALENDAR_EVENT_TASK:
-      calendar_task_finalize (CALENDAR_TASK (event));
-      break;
-    case CALENDAR_EVENT_ALL:
-    default:
-      g_assert_not_reached ();
-      break;
-    }
-
-  g_free (event);
-}
-
+/* Event copy helpers */
 static void
 calendar_appointment_copy (CalendarAppointment *appointment,
 			   CalendarAppointment *appointment_copy)
@@ -1157,4 +926,162 @@ calendar_event_copy (CalendarEvent *event)
     }
 
   return retval;
+}
+
+GSList *
+calendar_client_vdir_get_events (CalendarClientVdir    *client,
+			    CalendarEventType  event_mask)
+{
+  GSList *result = NULL;
+  GSList *l;
+  time_t day_begin, day_end;
+  
+  g_return_val_if_fail (CALENDAR_IS_CLIENT (client), NULL);
+  g_return_val_if_fail (client->priv->day != G_MAXUINT, NULL);
+  g_return_val_if_fail (client->priv->month != G_MAXUINT, NULL);
+  g_return_val_if_fail (client->priv->year != G_MAXUINT, NULL);
+
+  day_begin = make_time_for_day_begin (client->priv->day,
+				       client->priv->month,
+				       client->priv->year);
+  day_end   = make_time_for_day_begin (client->priv->day + 1,
+				       client->priv->month,
+				       client->priv->year);
+
+  for (l = client->priv->sources; l != NULL; l = l->next)
+    {
+      VdirSource *source = l->data;
+      GHashTableIter iter;
+      gpointer key, value;
+      
+      g_hash_table_iter_init (&iter, source->events);
+      while (g_hash_table_iter_next (&iter, &key, &value))
+        {
+          CalendarEvent *event = value;
+          
+          if (event->type == CALENDAR_EVENT_APPOINTMENT && (event_mask & CALENDAR_EVENT_APPOINTMENT))
+            {
+              CalendarAppointment *appt = CALENDAR_APPOINTMENT (event);
+              
+              /* Check if appointment is on this day */
+              if ((appt->start_time >= day_begin && appt->start_time < day_end) ||
+                  (appt->start_time <= day_begin && appt->end_time > day_begin))
+                {
+                  result = g_slist_prepend (result, calendar_event_copy (event));
+                }
+            }
+          else if (event->type == CALENDAR_EVENT_TASK && (event_mask & CALENDAR_EVENT_TASK))
+            {
+              /* Include all tasks */
+              result = g_slist_prepend (result, calendar_event_copy (event));
+            }
+        }
+    }
+  
+  return result;
+}
+
+void
+calendar_client_vdir_foreach_appointment_day (CalendarClientVdir  *client,
+					 CalendarDayIter  iter_func,
+					 gpointer         user_data)
+{
+  GSList *l;
+  gboolean marked_days[32] = { FALSE, };
+  time_t month_begin, month_end;
+  int i;
+  
+  g_return_if_fail (CALENDAR_IS_CLIENT (client));
+  g_return_if_fail (iter_func != NULL);
+  g_return_if_fail (client->priv->month != G_MAXUINT);
+  g_return_if_fail (client->priv->year != G_MAXUINT);
+
+  month_begin = make_time_for_day_begin (1,
+					 client->priv->month,
+					 client->priv->year);
+  month_end   = make_time_for_day_begin (1,
+					 client->priv->month + 1,
+					 client->priv->year);
+
+  for (l = client->priv->sources; l != NULL; l = l->next)
+    {
+      VdirSource *source = l->data;
+      GHashTableIter iter;
+      gpointer key, value;
+      
+      g_hash_table_iter_init (&iter, source->events);
+      while (g_hash_table_iter_next (&iter, &key, &value))
+        {
+          CalendarEvent *event = value;
+          
+          if (event->type == CALENDAR_EVENT_APPOINTMENT)
+            {
+              CalendarAppointment *appt = CALENDAR_APPOINTMENT (event);
+              
+              if (appt->start_time >= month_begin && appt->start_time < month_end)
+                {
+                  struct tm *tm = localtime (&appt->start_time);
+                  if (tm && tm->tm_mday >= 1 && tm->tm_mday <= 31)
+                    marked_days[tm->tm_mday] = TRUE;
+                }
+            }
+        }
+    }
+
+  for (i = 1; i < 32; i++)
+    {
+      if (marked_days[i])
+	iter_func ((CalendarClient *)client, i, user_data);
+    }
+}
+
+void
+calendar_client_vdir_set_task_completed (CalendarClientVdir *client,
+				    char           *task_uid,
+				    gboolean        task_completed,
+				    guint           percent_complete)
+{
+  /* Not implemented for vdir (read-only for now) */
+  g_warning ("calendar_client_vdir_set_task_completed not implemented for vdir backend");
+}
+
+gboolean
+calendar_client_vdir_create_task (CalendarClientVdir *client,
+                            const char     *summary)
+{
+  /* Not implemented for vdir (read-only for now) */
+  g_warning ("calendar_client_vdir_create_task not implemented for vdir backend");
+  return FALSE;
+}
+
+void
+calendar_client_vdir_update_appointments (CalendarClientVdir *client)
+{
+  GSList *l;
+  
+  g_return_if_fail (CALENDAR_IS_CLIENT (client));
+  
+  for (l = client->priv->sources; l != NULL; l = l->next)
+    {
+      VdirSource *source = l->data;
+      vdir_source_load_events (source, client);
+    }
+  
+  g_signal_emit (client, signals[APPOINTMENTS_CHANGED], 0);
+}
+
+void
+calendar_client_vdir_update_tasks (CalendarClientVdir *client)
+{
+  GSList *l;
+  
+  g_return_if_fail (CALENDAR_IS_CLIENT (client));
+  
+  for (l = client->priv->sources; l != NULL; l = l->next)
+    {
+      VdirSource *source = l->data;
+      vdir_source_load_events (source, client);
+    }
+  
+  g_signal_emit (client, signals[TASKS_CHANGED], 0);
 }

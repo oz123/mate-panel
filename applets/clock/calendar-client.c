@@ -36,6 +36,10 @@
 #include "system-timezone.h"
 #endif
 
+#ifdef HAVE_VDIR
+#include "calendar-client-vdir.h"
+#endif
+
 #undef CALENDAR_ENABLE_DEBUG
 #include "calendar-debug.h"
 
@@ -83,6 +87,10 @@ struct _CalendarClientPrivate
 
   guint                zone_listener;
   GSettings           *calendar_settings;
+
+#ifdef HAVE_VDIR
+  CalendarClientVdir  *vdir_client;
+#endif
 
   guint                day;
   guint                month;
@@ -376,6 +384,12 @@ calendar_client_finalize (GObject *object)
     g_object_unref (client->priv->calendar_sources);
   client->priv->calendar_sources = NULL;
 
+#ifdef HAVE_VDIR
+  if (client->priv->vdir_client)
+    g_object_unref (client->priv->vdir_client);
+  client->priv->vdir_client = NULL;
+#endif
+
   G_OBJECT_CLASS (calendar_client_parent_class)->finalize (object);
 }
 
@@ -454,6 +468,18 @@ calendar_client_new (GSettings *settings)
       client->priv->calendar_settings = NULL;
     }
   }
+
+#ifdef HAVE_VDIR
+  /* Create vdir backend if available */
+  client->priv->vdir_client = calendar_client_vdir_new (settings);
+  if (client->priv->vdir_client) {
+    /* Forward vdir signals to main client */
+    g_signal_connect_swapped (client->priv->vdir_client, "appointments-changed",
+                              G_CALLBACK (calendar_client_update_appointments), client);
+    g_signal_connect_swapped (client->priv->vdir_client, "tasks-changed",
+                              G_CALLBACK (calendar_client_update_tasks), client);
+  }
+#endif
 
   return client;
 }
@@ -1657,6 +1683,12 @@ calendar_client_select_month (CalendarClient *client,
       client->priv->month = month;
       client->priv->year  = year;
 
+#ifdef HAVE_VDIR
+      /* Propagate to vdir backend */
+      if (client->priv->vdir_client)
+        calendar_client_vdir_select_month (client->priv->vdir_client, month, year);
+#endif
+
       calendar_client_update_appointments (client);
       calendar_client_update_tasks (client);
 
@@ -1677,6 +1709,12 @@ calendar_client_select_day (CalendarClient *client,
   if (client->priv->day != day)
     {
       client->priv->day = day;
+
+#ifdef HAVE_VDIR
+      /* Propagate to vdir backend */
+      if (client->priv->vdir_client)
+        calendar_client_vdir_select_day (client->priv->vdir_client, day);
+#endif
 
       /* don't need to update appointments unless
        * the selected month changes
@@ -1848,6 +1886,20 @@ calendar_client_get_events (CalendarClient    *client,
 					     day_end);
     }
 
+#ifdef HAVE_VDIR
+  /* Add events from vdir backend */
+  if (client->priv->vdir_client)
+    {
+      GSList *vdir_events = calendar_client_vdir_get_events (client->priv->vdir_client, event_mask);
+      if (vdir_events)
+        {
+          /* Prepend vdir events to EDS events */
+          GSList *combined = g_slist_concat (appointments, tasks);
+          return g_slist_concat (vdir_events, combined);
+        }
+    }
+#endif
+
   return g_slist_concat (appointments, tasks);
 }
 
@@ -1920,6 +1972,17 @@ calendar_client_foreach_appointment_day (CalendarClient  *client,
     }
 
   g_slist_free (appointments);
+
+#ifdef HAVE_VDIR
+  /* Add vdir appointments to marked days */
+  if (client->priv->vdir_client)
+    {
+      calendar_client_vdir_foreach_appointment_day (client->priv->vdir_client,
+                                                     (CalendarDayIter)iter_func,
+                                                     user_data);
+      /* Note: vdir will call iter_func for its days, we just need to mark our EDS days */
+    }
+#endif
 
   for (i = 1; i < 32; i++)
     {
