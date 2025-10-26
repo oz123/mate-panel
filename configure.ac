@@ -123,6 +123,21 @@ AM_CONDITIONAL(HAVE_EDS, test "x$have_eds" = "xyes")
 AC_SUBST(EDS_CFLAGS)
 AC_SUBST(EDS_LIBS)
 
+# Optional vdir backend (dummy) for calendar client
+AC_ARG_ENABLE([vdir],
+  AS_HELP_STRING([--enable-vdir], [Enable vdir calendar backend (dummy backend that returns a single meeting) @<:@default=no@:>@]),
+  [enable_vdir=$enableval],
+  [enable_vdir=no])
+
+if test "x$enable_vdir" = "xyes"; then
+  have_vdir=yes
+  AC_DEFINE([HAVE_VDIR], 1, [Define to build the vdir (dummy) calendar backend])
+else
+  have_vdir=no
+fi
+
+AM_CONDITIONAL([HAVE_VDIR], [test "x$have_vdir" = "xyes"])
+
 # Make it possible to compile the applets in-process
 PANEL_INPROCESS_NONE=
 PANEL_INPROCESS_ALL=
@@ -395,6 +410,7 @@ echo "
         X11 support:                   ${have_x11}
         XRandr support:                ${have_randr}
         Evolution Data Server support: ${have_eds}
+  VDIR support:                  ${have_vdir}
         Build introspection support:   ${found_introspection}
         Build gtk-doc documentation:   ${enable_gtk_doc}
 

@@ -72,6 +72,9 @@
 #include "clock.h"
 
 #include "calendar-window.h"
+#if defined(HAVE_EDS) || defined(HAVE_VDIR)
+#include "calendar-client.h"
+#endif
 #include "clock-location.h"
 #include "clock-location-tile.h"
 #include "clock-map.h"
@@ -212,7 +215,7 @@ struct _ClockData {
 
         GDBusProxy *system_manager_proxy;
 
-#ifdef HAVE_EDS
+#if defined(HAVE_EDS) || defined(HAVE_VDIR)
         CalendarClient *calendar_client;
 #endif
 };
@@ -832,7 +835,7 @@ destroy_clock (GtkWidget * widget, ClockData *cd)
                 cd->builder = NULL;
         }
 
-#ifdef HAVE_EDS
+#if defined(HAVE_EDS) || defined(HAVE_VDIR)
         if (cd->calendar_client) {
                 g_object_unref (cd->calendar_client);
                 cd->calendar_client = NULL;
@@ -898,7 +901,7 @@ create_calendar (ClockData *cd)
                                       cd->settings);
         g_free (prefs_path);
 
-#ifdef HAVE_EDS
+#if defined(HAVE_EDS) || defined(HAVE_VDIR)
         if (cd->calendar_client) {
                 calendar_window_set_client (CALENDAR_WINDOW (window), cd->calendar_client);
         }
@@ -2780,7 +2783,7 @@ fill_clock_applet (MatePanelApplet *applet)
          * hibernate). */
         setup_monitor_for_resume (cd);
 
-#ifdef HAVE_EDS
+#if defined(HAVE_EDS) || defined(HAVE_VDIR)
         /* Initialize persistent calendar client */
         cd->calendar_client = calendar_client_new (cd->settings);
 #endif

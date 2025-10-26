@@ -42,6 +42,13 @@ CLOCK_SOURCES += \
 	calendar-sources.c	\
 	calendar-sources.h	\
 	calendar-debug.h
+else
+if HAVE_VDIR
+CLOCK_SOURCES += \
+	calendar-client.c	\
+	calendar-client.h	\
+	calendar-debug.h
+endif
 endif
 
 CLOCK_CPPFLAGS =						\
