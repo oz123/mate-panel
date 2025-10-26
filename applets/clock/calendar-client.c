@@ -1829,9 +1829,20 @@ calendar_client_get_events (CalendarClient    *client,
 				       client->priv->year);
 
   appointments = NULL;
-  if (event_mask & CALENDAR_EVENT_APPOINTMENT)
+  if (event_mask & CALENDAR_EVENT_APPOINTMENT) {
+     appointments = calendar_client_filter_events(client,
+        client->priv->appointment_sources,
+        filter_appointment,
+        day_begin,
+        day_end);
+
+    // Append dummy only for today
+    time_t now = time(NULL);
+    struct tm *lt = localtime(&now);
+    if (lt && lt->tm_mday == client->priv->day &&
+        lt->tm_mon == client->priv->month &&
+        (lt->tm_year + 1900) == client->priv->year)
     {
-        /* Always show a dummy appointment for today in the dummy backend */
         CalendarEvent *dummy_event = g_new0(CalendarEvent, 1);
         dummy_event->type = CALENDAR_EVENT_APPOINTMENT;
         CalendarAppointment *dummy = CALENDAR_APPOINTMENT(dummy_event);
@@ -1843,8 +1854,9 @@ calendar_client_get_events (CalendarClient    *client,
         dummy->start_time = day_begin + 3600; /* 1 hour after day start */
         dummy->end_time = dummy->start_time + 3600; /* 1 hour duration */
         dummy->is_all_day = FALSE;
-        appointments = g_slist_append(NULL, dummy_event);
+        appointments = g_slist_append(appointments, dummy_event);
     }
+  }
 
   tasks = NULL;
   if (event_mask & CALENDAR_EVENT_TASK)
