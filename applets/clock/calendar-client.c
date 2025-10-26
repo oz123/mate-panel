@@ -1831,11 +1831,19 @@ calendar_client_get_events (CalendarClient    *client,
   appointments = NULL;
   if (event_mask & CALENDAR_EVENT_APPOINTMENT)
     {
-      appointments = calendar_client_filter_events (client,
-						    client->priv->appointment_sources,
-						    filter_appointment,
-						    day_begin,
-						    day_end);
+        /* Always show a dummy appointment for today in the dummy backend */
+        CalendarEvent *dummy_event = g_new0(CalendarEvent, 1);
+        dummy_event->type = CALENDAR_EVENT_APPOINTMENT;
+        CalendarAppointment *dummy = CALENDAR_APPOINTMENT(dummy_event);
+        dummy->uid = g_strdup("dummy-uid");
+        dummy->backend_name = g_strdup("Dummy");
+        dummy->summary = g_strdup("Dummy Meeting");
+        dummy->description = g_strdup("This is a dummy appointment.");
+        dummy->color_string = g_strdup("#FFC0CB"); /* Pink */
+        dummy->start_time = day_begin + 3600; /* 1 hour after day start */
+        dummy->end_time = dummy->start_time + 3600; /* 1 hour duration */
+        dummy->is_all_day = FALSE;
+        appointments = g_slist_append(NULL, dummy_event);
     }
 
   tasks = NULL;
