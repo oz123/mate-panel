@@ -35,20 +35,35 @@ CLOCK_SOURCES = 		\
 	set-timezone.h		\
 	$(BUILT_SOURCES)
 
+# Add common calendar files if either EDS or VDIR is enabled
 if HAVE_EDS
-CLOCK_SOURCES += \
-	calendar-client.c	\
-	calendar-client.h	\
-	calendar-sources.c	\
-	calendar-sources.h	\
-	calendar-debug.h
-else
-if HAVE_VDIR
 CLOCK_SOURCES += \
 	calendar-client.c	\
 	calendar-client.h	\
 	calendar-debug.h
 endif
+
+if HAVE_VDIR
+if !HAVE_EDS
+CLOCK_SOURCES += \
+	calendar-client.c	\
+	calendar-client.h	\
+	calendar-debug.h
+endif
+endif
+
+# Add EDS-specific sources
+if HAVE_EDS
+CLOCK_SOURCES += \
+	calendar-sources.c	\
+	calendar-sources.h
+endif
+
+# Add VDIR-specific dummy event sources
+if HAVE_VDIR
+CLOCK_SOURCES += \
+	calendar-client-dummy.c	\
+	calendar-client-dummy.h
 endif
 
 CLOCK_CPPFLAGS =						\

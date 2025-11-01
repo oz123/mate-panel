@@ -29,7 +29,7 @@
 #include <string.h>
 #define HANDLE_LIBICAL_MEMORY
 
-#if defined(HAVE_EDS) && !defined(HAVE_VDIR)
+#ifdef HAVE_EDS
 
 #include <libecal/libecal.h>
 #include "calendar-sources.h"
@@ -47,7 +47,7 @@
 #define N_(x) x
 #endif
 
-#if defined(HAVE_EDS) && !defined(HAVE_VDIR)
+#ifdef HAVE_EDS
 
 typedef struct _CalendarClientQuery  CalendarClientQuery;
 typedef struct _CalendarClientSource CalendarClientSource;
@@ -1807,6 +1807,10 @@ calendar_client_filter_events (CalendarClient          *client,
   return retval;
 }
 
+#ifdef HAVE_VDIR
+#include "calendar-client-dummy.h"
+#endif
+
 GSList *
 calendar_client_get_events (CalendarClient    *client,
 			    CalendarEventType  event_mask)
@@ -1829,34 +1833,27 @@ calendar_client_get_events (CalendarClient    *client,
 				       client->priv->year);
 
   appointments = NULL;
-  if (event_mask & CALENDAR_EVENT_APPOINTMENT) {
-     appointments = calendar_client_filter_events(client,
-        client->priv->appointment_sources,
-        filter_appointment,
-        day_begin,
-        day_end);
-
-    // Append dummy only for today
-    time_t now = time(NULL);
-    struct tm *lt = localtime(&now);
-    if (lt && lt->tm_mday == client->priv->day &&
-        lt->tm_mon == client->priv->month &&
-        (lt->tm_year + 1900) == client->priv->year)
+  if (event_mask & CALENDAR_EVENT_APPOINTMENT)
     {
-        CalendarEvent *dummy_event = g_new0(CalendarEvent, 1);
-        dummy_event->type = CALENDAR_EVENT_APPOINTMENT;
-        CalendarAppointment *dummy = CALENDAR_APPOINTMENT(dummy_event);
-        dummy->uid = g_strdup("dummy-uid");
-        dummy->backend_name = g_strdup("Dummy");
-        dummy->summary = g_strdup("Dummy Meeting");
-        dummy->description = g_strdup("This is a dummy appointment.");
-        dummy->color_string = g_strdup("#FFC0CB"); /* Pink */
-        dummy->start_time = day_begin + 3600; /* 1 hour after day start */
-        dummy->end_time = dummy->start_time + 3600; /* 1 hour duration */
-        dummy->is_all_day = FALSE;
-        appointments = g_slist_append(appointments, dummy_event);
+      appointments = calendar_client_filter_events (client,
+						    client->priv->appointment_sources,
+						    filter_appointment,
+						    day_begin,
+						    day_end);
+
+#ifdef HAVE_VDIR
+      /* Append dummy appointment only for today when VDIR is enabled */
+      time_t now = time (NULL);
+      struct tm *lt = localtime (&now);
+      if (lt && lt->tm_mday == (int) client->priv->day &&
+          lt->tm_mon == (int) client->priv->month &&
+          (lt->tm_year + 1900) == (int) client->priv->year)
+        {
+          CalendarEvent *dummy_event = create_dummy_appointment_event (day_begin);
+          appointments = g_slist_append (appointments, dummy_event);
+        }
+#endif /* HAVE_VDIR */
     }
-  }
 
   tasks = NULL;
   if (event_mask & CALENDAR_EVENT_TASK)
@@ -2107,413 +2104,4 @@ calendar_client_create_task (CalendarClient *client,
   return success;
 }
 
-#endif /* HAVE_EDS && !HAVE_VDIR */
-
-#ifdef HAVE_VDIR
-
-/*
- * Dummy VDIR backend: returns a single meeting on today's date at 00:00.
- * This is a minimal implementation of CalendarClient that satisfies
- * the public API without any external dependencies.
- */
-
-typedef struct _CalendarClientPrivate CalendarClientPrivate;
-
-struct _CalendarClientPrivate
-{
-  guint day;
-  guint month;
-  guint year;
-};
-
-static void calendar_client_finalize     (GObject             *object);
-static void calendar_client_set_property (GObject             *object,
-                                          guint                prop_id,
-                                          const GValue        *value,
-                                          GParamSpec          *pspec);
-static void calendar_client_get_property (GObject             *object,
-                                          guint                prop_id,
-                                          GValue              *value,
-                                          GParamSpec          *pspec);
-
-enum
-{
-  PROP_O,
-  PROP_DAY,
-  PROP_MONTH,
-  PROP_YEAR
-};
-
-enum
-{
-  APPOINTMENTS_CHANGED,
-  TASKS_CHANGED,
-  LAST_SIGNAL
-};
-
-static guint signals [LAST_SIGNAL] = { 0, };
-
-G_DEFINE_TYPE_WITH_PRIVATE (CalendarClient, calendar_client, G_TYPE_OBJECT)
-
-static void
-calendar_client_class_init (CalendarClientClass *klass)
-{
-  GObjectClass *gobject_class = (GObjectClass *) klass;
-
-  gobject_class->finalize     = calendar_client_finalize;
-  gobject_class->set_property = calendar_client_set_property;
-  gobject_class->get_property = calendar_client_get_property;
-
-  g_object_class_install_property (gobject_class,
-                                   PROP_DAY,
-                                   g_param_spec_uint ("day",
-                                                      "Day",
-                                                      "The currently monitored day between 1 and 31 (0 denotes unset)",
-                                                      0, G_MAXUINT, 0,
-                                                      G_PARAM_READWRITE));
-
-  g_object_class_install_property (gobject_class,
-                                   PROP_MONTH,
-                                   g_param_spec_uint ("month",
-                                                      "Month",
-                                                      "The currently monitored month between 0 and 11",
-                                                      0, G_MAXUINT, 0,
-                                                      G_PARAM_READWRITE));
-
-  g_object_class_install_property (gobject_class,
-                                   PROP_YEAR,
-                                   g_param_spec_uint ("year",
-                                                      "Year",
-                                                      "The currently monitored year",
-                                                      0, G_MAXUINT, 0,
-                                                      G_PARAM_READWRITE));
-
-  signals [APPOINTMENTS_CHANGED] =
-    g_signal_new ("appointments-changed",
-                  G_TYPE_FROM_CLASS (gobject_class),
-                  G_SIGNAL_RUN_LAST,
-                  G_STRUCT_OFFSET (CalendarClientClass, tasks_changed),
-                  NULL,
-                  NULL,
-                  NULL,
-                  G_TYPE_NONE,
-                  0);
-
-  signals [TASKS_CHANGED] =
-    g_signal_new ("tasks-changed",
-                  G_TYPE_FROM_CLASS (gobject_class),
-                  G_SIGNAL_RUN_LAST,
-                  G_STRUCT_OFFSET (CalendarClientClass, tasks_changed),
-                  NULL,
-                  NULL,
-                  NULL,
-                  G_TYPE_NONE,
-                  0);
-}
-
-static void
-calendar_client_init (CalendarClient *client)
-{
-  client->priv = calendar_client_get_instance_private (client);
-  client->priv->day = G_MAXUINT;
-  client->priv->month = G_MAXUINT;
-  client->priv->year = G_MAXUINT;
-}
-
-static void
-calendar_client_finalize (GObject *object)
-{
-  G_OBJECT_CLASS (calendar_client_parent_class)->finalize (object);
-}
-
-static void
-calendar_client_set_property (GObject      *object,
-                              guint         prop_id,
-                              const GValue *value,
-                              GParamSpec   *pspec)
-{
-  CalendarClient *client = CALENDAR_CLIENT (object);
-
-  switch (prop_id)
-    {
-    case PROP_DAY:
-      calendar_client_select_day (client, g_value_get_uint (value));
-      break;
-    case PROP_MONTH:
-      calendar_client_select_month (client,
-                                    g_value_get_uint (value),
-                                    client->priv->year);
-      break;
-    case PROP_YEAR:
-      calendar_client_select_month (client,
-                                    client->priv->month,
-                                    g_value_get_uint (value));
-      break;
-    default:
-      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
-      break;
-    }
-}
-
-static void
-calendar_client_get_property (GObject    *object,
-                              guint       prop_id,
-                              GValue     *value,
-                              GParamSpec *pspec)
-{
-  CalendarClient *client = CALENDAR_CLIENT (object);
-
-  switch (prop_id)
-    {
-    case PROP_DAY:
-      g_value_set_uint (value, client->priv->day);
-      break;
-    case PROP_MONTH:
-      g_value_set_uint (value, client->priv->month);
-      break;
-    case PROP_YEAR:
-      g_value_set_uint (value, client->priv->year);
-      break;
-    default:
-      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
-      break;
-    }
-}
-
-CalendarClient *
-calendar_client_new (GSettings *settings)
-{
-  /* settings is unused in the dummy backend */
-  (void)settings;
-  return g_object_new (CALENDAR_TYPE_CLIENT, NULL);
-}
-
-static inline time_t
-make_time_for_day_begin (int day,
-                         int month,
-                         int year)
-{
-  struct tm localtime_tm = { 0, };
-
-  localtime_tm.tm_mday  = day;
-  localtime_tm.tm_mon   = month;
-  localtime_tm.tm_year  = year - 1900;
-  localtime_tm.tm_isdst = -1;
-
-  return mktime (&localtime_tm);
-}
-
-void
-calendar_client_get_date (CalendarClient *client,
-                          guint          *year,
-                          guint          *month,
-                          guint          *day)
-{
-  g_return_if_fail (CALENDAR_IS_CLIENT (client));
-
-  if (year)
-    *year = client->priv->year;
-
-  if (month)
-    *month = client->priv->month;
-
-  if (day)
-    *day = client->priv->day;
-}
-
-void
-calendar_client_select_month (CalendarClient *client,
-                              guint           month,
-                              guint           year)
-{
-  g_return_if_fail (CALENDAR_IS_CLIENT (client));
-  g_return_if_fail (month <= 11);
-
-  if (client->priv->year != year || client->priv->month != month)
-    {
-      client->priv->month = month;
-      client->priv->year  = year;
-
-      g_object_freeze_notify (G_OBJECT (client));
-      g_object_notify (G_OBJECT (client), "month");
-      g_object_notify (G_OBJECT (client), "year");
-      g_object_thaw_notify (G_OBJECT (client));
-
-      /* In the dummy backend, emit changed to simulate data refresh */
-      g_signal_emit (client, signals[APPOINTMENTS_CHANGED], 0);
-      g_signal_emit (client, signals[TASKS_CHANGED], 0);
-    }
-}
-
-void
-calendar_client_select_day (CalendarClient *client,
-                            guint           day)
-{
-  g_return_if_fail (CALENDAR_IS_CLIENT (client));
-  g_return_if_fail (day <= 31);
-
-  if (client->priv->day != day)
-    {
-      client->priv->day = day;
-      g_object_notify (G_OBJECT (client), "day");
-
-      /* Emit changed to update any listeners */
-      g_signal_emit (client, signals[APPOINTMENTS_CHANGED], 0);
-      g_signal_emit (client, signals[TASKS_CHANGED], 0);
-    }
-}
-
-static CalendarEvent *
-dummy_meeting_for_today_if_selected (CalendarClient *client)
-{
-  time_t now = time (NULL);
-  struct tm *lt = localtime (&now);
-  if (!lt)
-    return NULL;
-
-  /* Only return an event when the selected date matches today */
-  if (client->priv->year == (guint)(lt->tm_year + 1900) &&
-      client->priv->month == (guint)lt->tm_mon &&
-      client->priv->day == (guint)lt->tm_mday)
-    {
-      CalendarEvent *event = g_new0 (CalendarEvent, 1);
-      event->type = CALENDAR_EVENT_APPOINTMENT;
-
-      CalendarAppointment *appt = CALENDAR_APPOINTMENT (event);
-      appt->uid = g_strdup ("vdir-dummy-uid");
-      appt->rid = NULL;
-      appt->backend_name = g_strdup ("vdir");
-      appt->summary = g_strdup (_("Dummy meeting"));
-      appt->description = NULL;
-      appt->color_string = NULL;
-
-      /* Start at today's 00:00 local time */
-      time_t start = make_time_for_day_begin (lt->tm_mday, lt->tm_mon, lt->tm_year + 1900);
-      appt->start_time = start;
-      appt->end_time = start + 3600; /* 1 hour meeting */
-      appt->is_all_day = FALSE;
-
-      CalendarOccurrence *occ = g_new0 (CalendarOccurrence, 1);
-      occ->start_time = appt->start_time;
-      occ->end_time   = appt->end_time;
-      appt->occurrences = g_slist_prepend (NULL, occ);
-
-      return event;
-    }
-
-  return NULL;
-}
-
-GSList *
-calendar_client_get_events (CalendarClient    *client,
-                            CalendarEventType  event_mask)
-{
-  g_return_val_if_fail (CALENDAR_IS_CLIENT (client), NULL);
-
-  GSList *list = NULL;
-
-  if (event_mask & CALENDAR_EVENT_APPOINTMENT)
-    {
-      CalendarEvent *e = dummy_meeting_for_today_if_selected (client);
-      if (e)
-        list = g_slist_prepend (list, e);
-    }
-
-  /* No tasks in the dummy backend */
-  return list;
-}
-
-void
-calendar_client_foreach_appointment_day (CalendarClient  *client,
-                                         CalendarDayIter  iter_func,
-                                         gpointer         user_data)
-{
-  g_return_if_fail (CALENDAR_IS_CLIENT (client));
-  g_return_if_fail (iter_func != NULL);
-  g_return_if_fail (client->priv->month != G_MAXUINT);
-  g_return_if_fail (client->priv->year != G_MAXUINT);
-
-  time_t now = time (NULL);
-  struct tm *lt = localtime (&now);
-  if (!lt)
-    return;
-
-  if ((guint)(lt->tm_year + 1900) == client->priv->year &&
-      (guint)lt->tm_mon == client->priv->month)
-    {
-      iter_func (client, (guint)lt->tm_mday, user_data);
-    }
-}
-
-void
-calendar_client_set_task_completed (CalendarClient *client,
-                                    char           *task_uid,
-                                    gboolean        task_completed,
-                                    guint           percent_complete)
-{
-  /* No-op in dummy backend */
-  (void)client; (void)task_uid; (void)task_completed; (void)percent_complete;
-}
-
-gboolean
-calendar_client_create_task (CalendarClient *client,
-                             const char     *summary)
-{
-  /* Not supported in dummy backend */
-  (void)client; (void)summary;
-  return FALSE;
-}
-
-void
-calendar_client_update_appointments (CalendarClient *client)
-{
-  g_signal_emit (client, signals[APPOINTMENTS_CHANGED], 0);
-}
-
-void
-calendar_client_update_tasks (CalendarClient *client)
-{
-  g_signal_emit (client, signals[TASKS_CHANGED], 0);
-}
-
-void
-calendar_event_free (CalendarEvent *event)
-{
-  if (!event)
-    return;
-
-  switch (event->type)
-    {
-    case CALENDAR_EVENT_APPOINTMENT:
-      {
-        GSList *l;
-        for (l = CALENDAR_APPOINTMENT (event)->occurrences; l; l = l->next)
-          g_free (l->data);
-        g_slist_free (CALENDAR_APPOINTMENT (event)->occurrences);
-        CALENDAR_APPOINTMENT (event)->occurrences = NULL;
-
-        g_free (CALENDAR_APPOINTMENT (event)->uid);
-        g_free (CALENDAR_APPOINTMENT (event)->rid);
-        g_free (CALENDAR_APPOINTMENT (event)->backend_name);
-        g_free (CALENDAR_APPOINTMENT (event)->summary);
-        g_free (CALENDAR_APPOINTMENT (event)->description);
-        g_free (CALENDAR_APPOINTMENT (event)->color_string);
-      }
-      break;
-    case CALENDAR_EVENT_TASK:
-      {
-        g_free (CALENDAR_TASK (event)->uid);
-        g_free (CALENDAR_TASK (event)->summary);
-        g_free (CALENDAR_TASK (event)->description);
-        g_free (CALENDAR_TASK (event)->color_string);
-      }
-      break;
-    case CALENDAR_EVENT_ALL:
-    default:
-      break;
-    }
-
-  g_free (event);
-}
-
-#endif /* HAVE_VDIR */
+#endif /* HAVE_EDS */
